@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:clock/clock.dart';
 import 'package:cv_camera/src/controller/camera_controller.dart';
+import 'package:cv_camera/src/misc/range.dart';
 import 'package:cv_camera/src/models/calibration_data/calibration_data.dart';
 import 'package:cv_camera/src/utils/image_builder.dart';
 import 'package:flutter/foundation.dart';
@@ -178,6 +179,63 @@ class CameraControllerImpl implements CameraController {
     return Stream.periodic(Duration(milliseconds: interval), (i) async {
       return await getFaceIdSensorData();
     }).asyncMap((event) => event);
+  }
+
+  @override
+  bool checkForObject({
+    required List<double> depthValues,
+    required double minCoverage,
+  }) {
+    if (minCoverage < 0 || minCoverage > 1) {
+      throw RangeError("minCoverage must be between 0 and 1");
+    }
+    // todo: read values from swift
+    final width = 640;
+    final height = 480;
+
+    final centerWidthRange = Range(
+      (width * 0.3).toInt(),
+      (width * 0.7).toInt(),
+    );
+    final centerHeightRange = Range(
+      (height * 0.3).toInt(),
+      (height * 0.7).toInt(),
+    );
+    final centerCount =
+        (centerWidthRange.upperBound - centerWidthRange.lowerBound) *
+            (centerHeightRange.upperBound - centerHeightRange.lowerBound);
+    const depthRange = Range(0.15, 0.3);
+    int matchingValues = 0;
+
+    for (int i = 0; i < depthValues.length; i++) {
+      final x = i % width;
+      final y = i / width;
+      final value = depthValues[i];
+      if (depthRange.contains(value) &&
+          centerWidthRange.contains(x.toInt()) &&
+          centerHeightRange.contains(y.toInt())) {
+        matchingValues++;
+      }
+    }
+
+    final coverage = matchingValues / centerCount;
+    return coverage > minCoverage;
+  }
+
+  @override
+  Stream<List<double>> getDepthValueStream(int interval) {
+    return Stream.periodic(Duration(milliseconds: interval), (i) async {
+      // improve performance here. takes about 260 ms
+      final data = await getDepthValues();
+      return data;
+    }).asyncMap((event) => event);
+  }
+
+  @override
+  Future<List<double>> getDepthValues() async {
+    final result =
+        await methodChannel.invokeMethod<Float32List>("get_depth_values");
+    return result!.toList();
   }
 }
 
